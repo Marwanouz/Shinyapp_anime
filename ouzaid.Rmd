@@ -1,0 +1,288 @@
+---
+title: "Projet-Anime"
+author: "Marwan"
+date: "15/09/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("C:/Users/Marwan/Desktop/M2 TIDE/prérentré/intro R/Projet R/")
+```
+
+# Projet : Programmation sous R.
+
+## Partie 1
+
+### Jeu de données : anime.zip
+
+Dans un premier temps, on charge les librairies nécessaires pour la suite du code.
+
+```{r, message = FALSE, warning = FALSE}
+library("dplyr")                                                  
+library("plyr")                                                   
+library("readr")  
+library("tidyverse")
+library("ggplot2")
+library("goeveg")
+library("purrr")
+library("rlang")
+library("ggforce")
+```
+
+
+
+1. Proposer un code permettant de regrouper les données contenues dans anime.zip dans un seul et même data.frame.
+
+```{r, message=FALSE}
+# dir.create("temp")
+# temp <- tempfile()
+# con <- unzip("anime.zip", exdir = "temp")
+dat <- list.files(path = "C:/Users/Marwan/Desktop/M2 TIDE/prérentré/intro R/Projet R/temp",     
+                       pattern = "*.csv", full.names = TRUE) %>% 
+  ldply(read_csv)
+
+
+```
+
+On crée un répertoire "temp" où l'on va unzippé nos données pour pouvoir ensuite stocker l'ensemble des données dans une data frame nommée "dat"
+
+2. Observer pour chaque variable, le nombre et la proportion de valeurs manquantes.
+
+```{r, warning = FALSE}
+
+dat %>%  glimpse()
+
+dat %>% 
+  select_if(function(x) any(is.na(x))) %>% 
+  summarise_each((funs(sum(is.na(.))))) 
+
+dat %>% 
+  select_if(function(x) any(is.na(x))) %>% 
+  summarise_each((funs(100*mean(is.na(.))))) 
+
+
+```
+
+On observe que les variables manquantes se concentrent sur les variables [genre,type,rating,ratin_10,rating_100,rating_1000]
+On doit gérer les NAs pour pouvoir travailler avec la base de données.
+On remarque par la même occasion que la variable episode est de type character.
+
+```{r}
+dat <- dat %>% 
+          drop_na()
+
+```
+
+```{r, message=FALSE, warning=FALSE}
+dat %>% 
+    select(episodes) %>%  
+    distinct() 
+
+```
+
+
+```{r}
+
+dat <- dat %>% 
+              filter(!(episodes == "Unknown"))
+```
+
+On décide de supprimer les lignes où des valeurs manquantes sont présentes.
+On remarque que la variable prend la valeur "Unknown". 
+On décide de supprimer les lignes où les épisodes sont "Unknown".
+
+
+
+3. Représenter graphiquement la distribution du nombre d’épisodes.
+
+```{r}
+
+dat <- dat %>% 
+          mutate(episodes = as.numeric(episodes))
+dat %>%
+        group_by(anime_id) %>% 
+        ggplot(., aes(x = episodes)) + 
+        geom_histogram(bins = 50) + 
+        scale_x_log10() 
+
+
+```
+
+
+
+4. Combien d’animes n’ont pas le genre « Shounen » ?
+
+```{r}
+dat %>% 
+  filter( !grepl("Shounen",genre)) %>% 
+  tally
+
+```
+
+Il y a 10 100 anime qui n'ont pas le genre "Shounen".
+
+
+
+
+5. Donner la proportion de « Shounen » au sein de chaque type d’anime.
+
+```{r}
+
+dat %>% 
+  filter(grepl("Shounen",genre)) %>% 
+  group_by(type) %>% 
+  dplyr::summarize(n = n()) %>% # On précise la librairie où on cherche la fonction  
+  mutate(freq = n / sum(n))     # summarize pcq conflit avec une autre librairie
+
+```
+
+On a pour les types suivants [Movie,ONA,OVA,Special,TV] les proportions associées [0.21, 0.01, 0.21, 0.15, 0.40] respictivement.
+
+
+
+
+6. Créer une fonction permettant de donner la proportion d’un genre quelconque au sein de chaque type d’anime.
+
+
+```{r}
+prop_table_by_genre <- function(genre_){
+                
+              prop_table <- dat %>% 
+                            filter(grepl({{ genre_ }},genre)) %>% 
+                            group_by(type) %>% 
+                            dplyr::summarize(n = n()) %>%  
+                            mutate(freq = n / sum(n))
+                        
+                
+              return(prop_table)
+}
+
+```
+
+
+7. Proposer une représentation graphique permettant d’observer au sein de chaque type d’anime, quels genres sont les plus représentés.
+
+
+```{r}
+dat %>%
+            separate_rows(genre, sep = ",") %>% 
+            select(genre) %>% 
+            mutate(genre = str_trim(genre, side = "both")) %>%  
+            distinct()
+
+
+dat %>% select(type) %>% distinct() 
+```
+
+Dans le code ci-dessous on identfie les différents genre et type présent dans la base de données.
+On observe qu'il existe plus de 43 genres et 6 types différents.
+
+```{r}
+dat  %>%
+        separate_rows(genre, sep = ",") %>% 
+        mutate(genre = str_trim(genre, side = "both")) %>%  
+        select(genre,type) %>% group_by(genre) %>% 
+        mutate(., value = 1) %>% 
+        pivot_wider(names_from = genre, values_from = value, values_fill = 0, values_fn = length) %>% 
+        gather(key = genre, value = Value, Drama:Yuri) %>% 
+        group_by(type) %>% 
+        slice_max(Value, n=6) %>% 
+        ggplot(., aes(genre, Value, fill = type)) + geom_col(position = "dodge") + 
+        theme(axis.text.x = element_text(angle = 90))
+
+```
+
+
+
+8. Pour toutes les variables de types « rating ». Calculer la moyenne, la médiane, l’écart type, la mad (median absolute deviation), le coefficient de variation, la valeur maximum et la valeur minimum. Représentez graphiquement ces résultats.
+
+```{r}
+
+mu <- dat %>% select(rating, rating_10,rating_100,rating_1000) %>% 
+              gather(key = Rating, value = Value, rating:rating_1000) %>%                            
+              group_by(Rating) %>% 
+              dplyr::summarize(grp.mean = mean(Value),
+                              grp.mad = mad(Value),
+                              grp.sd  = sd(Value),
+                              grp.max = max(Value),
+                              grp.min = min(Value),
+                              grp.cv = goeveg::cv(Value)) #import de la librairies goeveg pour la fvt cv 
+
+
+
+dat %>%  select(rating, rating_10,rating_100,rating_1000) %>% 
+         gather(key = Rating, value = Value, rating:rating_1000) %>% 
+         ggplot(., aes(x=Value, group=Rating, fill=Rating)) +
+         geom_density(adjust=1.5, alpha=.4) +
+         facet_wrap(~Rating) +
+         scale_x_log10() +
+         geom_vline(aes(xintercept = grp.mean), data = mu, color="blue", linetype="dashed", size=1) +    
+  geom_vline(aes(xintercept = grp.sd), data = mu, color="orange", linetype="dashed", size=1) +           
+  geom_vline(aes(xintercept = grp.mad), data = mu, color="red", linetype="dashed", size=1) +             
+  geom_vline(aes(xintercept = grp.max), data = mu, color="yellow", linetype="dashed", size=1) +          
+  geom_vline(aes(xintercept = grp.min), data = mu, color="green", linetype="dashed", size=1) +           
+  geom_vline(aes(xintercept = grp.cv), data = mu, color="purple", linetype="dashed", size=1) 
+
+      
+```
+
+
+9. Proposer une représentation graphique permettant d’observer s’il existe une différence de notation en fonction du genre d’anime.
+
+
+```{r pressure}
+
+dat %>%
+        separate_rows(genre, sep = ",") %>% 
+        mutate(genre = str_trim(genre, side = "both")) %>% 
+        ggplot(., mapping = aes(x = genre, y = rating, fill = genre)) +
+        geom_boxplot(alpha=25) + 
+        coord_flip() + 
+        theme(legend.position = "none")
+
+```
+On propose un BOXPLOT pour pouvoir observer la différence de notation entre les différents genres.
+
+
+10. Pour chaque genre d’anime, représenter graphiquement le top 10 des animes les mieux notés.
+
+
+```{r}
+
+dat %>% 
+       separate_rows(genre, sep = ",") %>% 
+       mutate(genre = str_trim(genre, side = "both")) %>% 
+       group_by(genre) %>% 
+       slice_max(rating, n=10) %>%
+       ggplot(., mapping = aes(x = genre, y = rating, fill = genre)) +
+       geom_boxplot(alpha=25) + 
+       coord_flip() + 
+       theme(legend.position = "none")
+    
+
+```
+
+
+11. Etablir une critique sur les données et les statistiques que vous avez produites. Proposer éventuellement d’autres analyses pour compléter.
+
+
+La première difficulté de cette base de données était le fait qu'elle soit répartit sur plusieurs fichier qu'il a fallut réunir pour pouvoir l'étudier. En ce qui concerne l'exploration de la base de donnée elle ne présentait que très peu valeurs manquantes.
+Le faible nombre de variable ne permet pas d'avoir davantage d'information sur cette base de donnée. Il aurait peut-être avoir une autre source de données pour compléter notre base de donnée.
+
+
+## PARTIE 2 
+
+### Consigne : 
+              Proposer une application shiny avec ces données. Vous mettrez en avant l’utilité de votre application (thème et problématique libre).
+              L’application devra être déployée sur shinyapps.io.
+              
+
+Mon application a pour but de proposer à l'utilisateur une selection de film les mieux notés selon ses choix.
+
+L'application fonctionne par plateau. dans un premier il peut choisir selon le type d'anime qu'il préfère quels genre d'anime il peut trouver en majorité.
+Par la suite il peut regarder si dans le genre qu'il a choisi les notations des films sont plutôt bon ou mauvais.
+Au final il choisi selon le type et le genre choisi aux étapes précédents sur liste d'anime dans une tranche de note de son souhait.
+
+
+Voici le code qui à servit a dévelloper notre application shiny : https://marwanouzaid.shinyapps.io/projet_r/
